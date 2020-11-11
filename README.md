@@ -11,17 +11,18 @@ SoundWatch is an Android-based app designed for commercially available smartwatc
 [[Website](https://makeabilitylab.cs.washington.edu/project/soundwatch/)]
 [[Paper PDF](https://homes.cs.washington.edu/~djain/img/portfolio/Jain_SoundWatch_ASSETS2020.pdf)]
 
-![SoundWatch system mockup](images/SoundWatch_demos.png?raw=true "Title")
 
 ## Table Of Contents ##
 
-0. [Prerequesites](#prerequesites)
-1. [Setup](#setup)
-2. [Architecture performance test](#test)
-3. [Acknowledgement](#acknowledgement)
-4. [Support](#support)
+0. [Prerequisite](#prerequisites)
+1. [Screenshots](#Screenshots)
+2. [Setup](#setup)
+3. [Architecture performance test](#Architecture%20performance%20test)
+4. [Scenarios](#Scenarios)
+5. [Acknowledgement](#acknowledgement)
+6. [Support](#support)
 
-## Pre-requisites ##
+## Prerequisites ##
 --------------
 - Latest Android Studio (The project is developed with Android Studio 4.0)
 - Android SDK 28
@@ -29,9 +30,11 @@ SoundWatch is an Android-based app designed for commercially available smartwatc
 - Android Support Repository
 - Get the sound classification Tensorflow lite model and the label files that are open sourced [here](https://www.dropbox.com/sh/wngu1kuufwdk8nr/AAC1rm5QR-amL_HBzTOgsZnca?dl=0)
 
-Screenshots
+## Screenshots ##
 -------------
-![SoundWatch system mockup](images/SoundWatch_mockups.png?raw=true "Title")
+![SoundWatch system mockup](images/mockup.png?raw=true "Title")
+![SoundWatch system mockup 2](images/mockup_2.png?raw=true "Title")
+
 
 
 Folder Structure
@@ -71,7 +74,7 @@ Configuration
 - WARNING: If using the `WATCH_ONLY_ARCHITECTURE`, please copy the tflite model into assets folder in Wearable src folder, and specify the filename inside `MODEL_FILENAME` in SoundRecorder
 - Change `AUDIO_TRANMISSION_STYLE` in `MainActivity.java` for both Phone and Watch to change the Audio Transmission Style ("Raw Audio" which is faster to process and transmit vs. "Audio Features" which are more private)
 
-## Test ##
+## Architecture performance test ##
 -------
 
 - For Model Latency, enable "TEST_MODEL_LATENCY" in MainActivity for both Watch and Phone to test the model prediction time.
@@ -79,10 +82,18 @@ Configuration
 
 After enabling the boolean flags, just run the watch and phone app like usual. The test results will be output as `*.txt` (i.e: `watch_model.txt`, `e2e_latency.txt`) to local device directory (phone or watch) inside the `com.wearable.sound` folder.
 
+## Scenarios ##
+-------
+
+![SoundWatch system mockup 3](images/SoundWatch_mockups.png?raw=true "Title")
+
 ## Support ##
 -------
-Contact [Hung V Ngo](www.hungvngo.com) @MakeabilityLab through email `hvn297@cs.washington.edu`
-Developed with [Dhruv Jain](https://homes.cs.washington.edu/~djain/) and collaborators at the [Makeability Lab](https://makeabilitylab.cs.washington.edu/)
+- Developed with [Dhruv Jain](https://homes.cs.washington.edu/~djain/) and collaborators at [MakeabilityLab](https://makeabilitylab.cs.washington.edu/)
+- Contact [Khoa Nguyen](https://www.linkedin.com/in/akka/) @MakeabilityLab through email `akhoa99` at cs.washington.edu
+- Contact [Hung V Ngo](www.hungvngo.com) @MakeabilityLab through email `hvn297` at cs.washington.edu
+
+
 
 Drop us a note if you are using or plan to use SoundWatch for research purposes. We are also happy to help with any questions or issues.
 

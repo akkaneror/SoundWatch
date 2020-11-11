@@ -17,11 +17,12 @@
 package com.wearable.sound.ui.activity;
 
 import android.Manifest;
-import android.app.Activity;
+import android.app.Application;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
@@ -30,20 +31,36 @@ import android.media.AudioRecord;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+
+import androidx.annotation.NonNull;
 import androidx.annotation.WorkerThread;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.Fragment;
+import androidx.preference.EditTextPreference;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceManager;
+import androidx.preference.SwitchPreferenceCompat;
+
 
 import com.chaquo.python.PyException;
 import com.chaquo.python.PyObject;
@@ -63,9 +80,11 @@ import com.google.android.gms.wearable.Node;
 import com.google.android.gms.wearable.PutDataMapRequest;
 import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.wearable.sound.datalayer.DataLayerListenerService;
 import com.wearable.sound.R;
 import com.wearable.sound.models.SoundNotification;
+import com.wearable.sound.utils.Constants;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -79,8 +98,8 @@ import java.io.InputStreamReader;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.text.MessageFormat;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -90,6 +109,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -101,11 +121,16 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
  * item every second while it is open. Also allows user to take a photo and send that as an asset to
  * the paired wearable.
  */
-public class MainActivity extends Activity
+public class MainActivity extends AppCompatActivity
             implements
             CapabilityClient.OnCapabilityChangedListener {
 
     private static final String TAG = "MainActivity";
+
+    /**
+     * Different Mode configuration
+     */
+    public static final int HIGH_ACCURACY_MODE = 1;
 
     public static final boolean TEST_MODEL_LATENCY = false;
     public static final boolean TEST_E2E_LATENCY = false;
@@ -137,20 +162,26 @@ public class MainActivity extends Activity
 
     private static final String START_ACTIVITY_PATH = "/start-activity";
     private static final String AUDIO_PREDICTION_PATH = "/audio-prediction";
+    private static final String SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH = "/SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH";
+    private static final String SEND_LISTENING_STATUS_FROM_PHONE_PATH = "/SEND_LISTENING_STATUS_FROM_PHONE_PATH";
     private static final String COUNT_PATH = "/count";
     private static final String IMAGE_PATH = "/image";
     private static final String IMAGE_KEY = "photo";
     private static final String COUNT_KEY = "count";
+    private static final String MY_PREF = "my_preferences";
 
     private boolean mCameraSupported = false;
     int BufferElements2Rec = 16000;
 
+    private ConstraintLayout tutorialLayout;
     private ListView mDataItemList;
     private Button mSendPhotoBtn;
+    private Button tutorialBtn;
     private ImageView mThumbView;
     private Bitmap mImageBitmap;
     private View mStartActivityBtn;
     private DataItemAdapter mDataItemListAdapter;
+
 
     // Send DataItem
     private ScheduledExecutorService mGeneratorExecutor;
@@ -162,12 +193,11 @@ public class MainActivity extends Activity
     //private static final int RECORDER_AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT;
 
     private static final float PREDICTION_THRES = 0.5F;
-    private static final double DBLEVEL_THRES = -35.0;
+    private static final double DBLEVEL_THRES = 45.0;
     private Interpreter tfLite;
     private static final String MODEL_FILENAME = "file:///android_asset/example_model.tflite";
     private static final String LABEL_FILENAME = "file:///android_asset/labels.txt";
 
-    //TODO HUNG 5: This is a bad way of mapping. What if we decide not to display all these 30 sounds? Will we have to change this code manually? Can we figure out a way to specify just once what all sounds we want for each context (home, office, outdoors), and it gets synced on phone, watch and server?
     private static final String SPEECH = "Speech";
     private static final String KNOCKING = "Knocking";
     private static final String PHONE_RING = "Phone Ring";
@@ -196,16 +226,33 @@ public class MainActivity extends Activity
     private static final String CAT_MEOW= "Cat Meow";
     private static final String ALARM_CLOCK= "Alarm Clock";
     private static final String UTENSILS_AND_CUTLERY= "Utensils and Cutlery";
+    private static final String COUGHING = "Coughing";
+    private static final String TYPING = "Typing";
 
+    // List of all sounds
     public List<String> sounds = Arrays.asList(UTENSILS_AND_CUTLERY, ALARM_CLOCK, CAT_MEOW, SAW, VEHICLE, CAR_HONK,
             HAMMERING, SNORING, LAUGHING, HAIR_DRYER, TOILET_FLUSH, DOORBELL, DISHWASHER, BLENDER, TOOTHBRUSH,DOG_BARK,
             MICROWAVE, WATER_RUNNING, DOOR_IN_USE, SHAVER, BABY_CRY, CHOPPING, VACUUM, DRILL, FIRE_SMOKE_ALARM, SPEECH,
-            KNOCKING);
+            KNOCKING, COUGHING, TYPING);
+
+    // List of IDs of only high accuracy sounds (11 sounds)
+    private static List<Integer> highAccuracyList = new ArrayList<>(Arrays.asList(R.id.fire_smoke_alarm, R.id.speech,
+            R.id.door_in_use, R.id.water_running, R.id.knocking, R.id.microwave, R.id.dog_bark, R.id.cat_meow, R.id.car_honk,
+            R.id.vehicle, R.id.baby_crying));
+    // List of IDs of only low accuracy sounds (19 sounds)
+    private static List<Integer> lowAccuracyList = new ArrayList<>(Arrays.asList(R.id.utensils_and_cutlery, R.id.alarm_clock,
+            R.id.saw, R.id.hammering, R.id.snoring, R.id.laughing, R.id.hair_dryer, R.id.toilet_flush, R.id.door_bell,
+            R.id.dishwasher, R.id.blender, R.id.tooth_brush, R.id.shaver, R.id.chopping, R.id.vacuum, R.id.drill, R.id.phone_ring,
+            R.id.coughing, R.id.typing));
 
     private static final String SOUND_ENABLE_FROM_PHONE_PATH = "/SOUND_ENABLE_FROM_PHONE_PATH";
     public static final String AUDIO_LABEL = "AUDIO_LABEL";
+    public static final String FOREGROUND_LABEL = "FOREGROUND_LABEL";
+    public static final String WATCH_STATUS_LABEL = "WATCH_STATUS_LABEL";
 
     public static Map<String, SoundNotification> SOUNDS_MAP = new HashMap<String, SoundNotification>();
+
+    public SharedPreferences.OnSharedPreferenceChangeListener autoUpdate;
 
     {
         for (String sound : sounds) {
@@ -247,8 +294,65 @@ public class MainActivity extends Activity
             case R.id.dishwasher:
                 currentSound = SOUNDS_MAP.get(DISHWASHER);
                 break;
+            case R.id.door_bell:
+                currentSound = SOUNDS_MAP.get(DOORBELL);
+                break;
+            case R.id.shaver:
+                currentSound = SOUNDS_MAP.get(SHAVER);
+                break;
+            case R.id.tooth_brush:
+                currentSound = SOUNDS_MAP.get(TOOTHBRUSH);
+                break;
+            case R.id.toilet_flush:
+                currentSound = SOUNDS_MAP.get(VACUUM);
+                break;
+            case R.id.baby_crying:
+                currentSound = SOUNDS_MAP.get(BABY_CRY);
+                break;
+            case R.id.chopping:
+                currentSound = SOUNDS_MAP.get(CHOPPING);
+                break;
+            case R.id.blender:
+                currentSound = SOUNDS_MAP.get(BLENDER);
+                break;
+            case R.id.hair_dryer:
+                currentSound = SOUNDS_MAP.get(HAIR_DRYER);
+                break;
+            case R.id.snoring:
+                currentSound = SOUNDS_MAP.get(SNORING);
+                break;
+            case R.id.hammering:
+                currentSound = SOUNDS_MAP.get(HAMMERING);
+                break;
+            case R.id.saw:
+                currentSound = SOUNDS_MAP.get(SAW);
+                break;
+            case R.id.cat_meow:
+                currentSound = SOUNDS_MAP.get(CAT_MEOW);
+                break;
+            case R.id.alarm_clock:
+                currentSound = SOUNDS_MAP.get(ALARM_CLOCK);
+                break;
+            case R.id.utensils_and_cutlery:
+                currentSound = SOUNDS_MAP.get(UTENSILS_AND_CUTLERY);
+                break;
+            case R.id.dog_bark:
+                currentSound = SOUNDS_MAP.get(DOG_BARK);
+                break;
+            case R.id.drill:
+                currentSound = SOUNDS_MAP.get(DRILL);
+                break;
+            case R.id.vacuum:
+                currentSound = SOUNDS_MAP.get(VACUUM);
+                break;
             case R.id.laughing:
                 currentSound = SOUNDS_MAP.get(LAUGHING);
+                break;
+            case R.id.coughing:
+                currentSound = SOUNDS_MAP.get(COUGHING);
+                break;
+            case R.id.typing:
+                currentSound = SOUNDS_MAP.get(TYPING);
                 break;
             default:
                 break;
@@ -261,11 +365,13 @@ public class MainActivity extends Activity
                 int snoozeTextIndex = checkBox.getText().toString().indexOf("(Snoozed)");
                 String soundLabel = checkBox.getText().toString().substring(0, snoozeTextIndex);
                 checkBox.setText(soundLabel);
+//                checkBox.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
             }
             currentSound.isEnabled = isEnabled;
             new sendSoundEnableMessageToWatchTask(currentSound).execute();
         }
     }
+
 
     public class sendSoundEnableMessageToWatchTask extends AsyncTask<Void, Void, Void> {
         private String data;
@@ -289,7 +395,7 @@ public class MainActivity extends Activity
     private List<Short> soundBuffer = new ArrayList<>();
 
     /** Memory-map the model file in Assets. */
-    private static MappedByteBuffer loadModelFile(AssetManager assets, String modelFilename)
+    private static ByteBuffer loadModelFile(AssetManager assets, String modelFilename)
             throws IOException {
         AssetFileDescriptor fileDescriptor = assets.openFd(modelFilename);
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
@@ -316,6 +422,8 @@ public class MainActivity extends Activity
     public static final String mBroadcastSoundPrediction = "com.wearable.sound.broadcast.soundprediction";
     public static final String mBroadcastSnoozeSound = "com.wearable.sound.broadcast.snoozeSound";
     public static final String mBroadcastUnsnoozeSound = "com.wearable.sound.broadcast.unsnoozeSound";
+    public static final String mBroadcastForegroundService = "com.wearable.sound.broadcast.foregroundservice";
+    public static final String mBroadcastDisableForegroundService = "com.wearable.sound.broadcast.disableforegroundservice";
 
     private IntentFilter mIntentFilter;
 
@@ -405,6 +513,17 @@ public class MainActivity extends Activity
         }
     }
 
+    public static boolean isFirst(Context context){
+        final SharedPreferences reader = context.getSharedPreferences(MY_PREF, Context.MODE_PRIVATE);
+        final boolean first = reader.getBoolean("is_first", true);
+        if(first){
+            final SharedPreferences.Editor editor = reader.edit();
+            editor.putBoolean("is_first", false);
+            editor.apply();
+        }
+        return first;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -415,6 +534,7 @@ public class MainActivity extends Activity
         if (ARCHITECTURE.equals(PHONE_WATCH_SERVER_ARCHITECTURE)) {
             mSocket.on("audio_label", onNewMessage);
             mSocket.connect();
+            //            Toast.makeText(this, "socket connected", Toast.LENGTH_SHORT).show();
         }
 
         //Initialize python module
@@ -448,27 +568,180 @@ public class MainActivity extends Activity
         }
 
         mCameraSupported = getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY);
-        setContentView(R.layout.main_activity);
+        setContentView(R.layout.activity_main);
+
+//        RelativeLayout parent = findViewById(R.id.main_layout);
+
+        // inflate help_fragment into main_layout
+
+//        LayoutInflater inflater =
+//                (LayoutInflater) this.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+//        View convertView = inflater.inflate(R.layout.help_fragment, parent);
+//        tutorialLayout = convertView.findViewById(R.id.tutorial_layout);
+//        tutorialLayout.setVisibility(View.GONE);
+//        tutorialBtn = convertView.findViewById(R.id.tutorial_btn);
+//        tutorialBtn.setOnClickListener(new View.OnClickListener() {
+//            @Override
+//            public void onClick(View v) {
+//                Log.d(TAG, "onClick called");
+//                Intent tutorial = new Intent(MainActivity.this, Tutorial.class);
+//                startActivity(tutorial);
+//            }
+//        });
+
+        // create Bottom Navigation View for switch between tabs
+        LOGD(TAG, "create BottomNavigationView");
+        BottomNavigationView bottomNavView = findViewById(R.id.bottom_nav_view);
+        bottomNavView.setOnNavigationItemSelectedListener(mOnNavigationItemSelectedListener);
+
+        // set Mode
+        setAccuracyMode(HIGH_ACCURACY_MODE);
 
         // Stores DataItems received by the local broadcaster or from the paired watch.
 //        mDataItemListAdapter = new DataItemAdapter(this, android.R.layout.simple_list_item_1);
 //        mDataItemList.setAdapter(mDataItemListAdapter);
 
         mGeneratorExecutor = new ScheduledThreadPoolExecutor(1);
+        // Create a SharedPreference for checking if the app is opening for the first time
+        boolean isFirstTime = isFirst(MainActivity.this);
+        if (isFirstTime) {
+            bottomNavView.setSelectedItemId(R.id.bottom_navigation_item_help);
+            Intent tutorial = new Intent(MainActivity.this, Tutorial.class);
+            startActivity(tutorial);
+        }
+        // Create a SharedPreference for root_preferences to update and use value from the setting tab
+        SharedPreferences sharedPref = PreferenceManager
+                .getDefaultSharedPreferences(this);
+        boolean isSleepModeOn = sharedPref.getBoolean("foreground_service", false);
+        Log.d(TAG, "isSleepModeOn1" + isSleepModeOn);
+        if (!isSleepModeOn) {
+            Wearable.getMessageClient(MainActivity.this)
+                    .sendMessage(FOREGROUND_LABEL, SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH, "foreground_enabled".getBytes());
+        } else {
+            Wearable.getMessageClient(MainActivity.this)
+                    .sendMessage(FOREGROUND_LABEL, SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH, "foreground_disabled".getBytes());
+        }
 
+        // Turn this on to reset Preference every time the app open (1/2)
+//        SharedPreferences.Editor editor = sharedPref.edit();
+//        editor.clear().apply();
 
+        // // Turn this to true to reset Preference every time the app open (2/2)
+        PreferenceManager.setDefaultValues(this, R.xml.root_preferences, false);
+        isSleepModeOn = sharedPref.getBoolean("foreground_service", false);
+        
+//         Start the service once by default
+        Log.i(TAG, "Starting foreground service first time");
+        Intent serviceIntent = new Intent(MainActivity.this, DataLayerListenerService.class);
+        serviceIntent.setAction(Constants.ACTION.STARTFOREGROUND_ACTION);
+        ContextCompat.startForegroundService(MainActivity.this, serviceIntent);
 
-        Log.i(TAG, "Staring foreground service in main");
-        Intent serviceIntent = new Intent(this, DataLayerListenerService.class);
-
-        ContextCompat.startForegroundService(this, serviceIntent);
+        // Add toggle to turn on/off foreground service
+        autoUpdate = mOnSharedPreferenceChangeListener;
+        sharedPref.registerOnSharedPreferenceChangeListener(autoUpdate);
 
         mIntentFilter = new IntentFilter();
         mIntentFilter.addAction(mBroadcastSoundPrediction);
         mIntentFilter.addAction(mBroadcastSnoozeSound);
         mIntentFilter.addAction(mBroadcastUnsnoozeSound);
+        mIntentFilter.addAction(mBroadcastForegroundService);
         registerReceiver(mReceiver, mIntentFilter);
     }
+
+    // Preference Listener for Setting -> Foreground -> Enable/Disable Foreground Service
+    private final SharedPreferences.OnSharedPreferenceChangeListener
+            mOnSharedPreferenceChangeListener =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+                    Intent serviceIntent = new Intent(MainActivity.this, DataLayerListenerService.class);
+                    if (key.equals("foreground_service")) {
+                        boolean isSleepModeOn = sharedPreferences.getBoolean("foreground_service", false);
+                        if (!isSleepModeOn) {
+                            Log.i(TAG, "Starting foreground service in main (Sleep Mode OFF)");
+                            mSocket.on("audio_label", onNewMessage);
+                            mSocket.connect();
+
+                            serviceIntent.setAction(Constants.ACTION.STARTFOREGROUND_ACTION);
+                            ContextCompat.startForegroundService(MainActivity.this, serviceIntent);
+
+                            Wearable.getMessageClient(MainActivity.this)
+                                    .sendMessage(FOREGROUND_LABEL, SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH, "foreground_enabled".getBytes());
+//                          Toast.makeText(MainActivity.this, "Foreground service started.", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Log.i(TAG, "Stopping foreground service in main (Sleep Mode ON)");
+                            serviceIntent.setAction(Constants.ACTION.STOPFOREGROUND_ACTION);
+                            mSocket.disconnect();
+                            mSocket.off("audio_label", onNewMessage);
+
+                            ContextCompat.startForegroundService(MainActivity.this, serviceIntent);
+
+                            Wearable.getMessageClient(MainActivity.this)
+                                    .sendMessage(FOREGROUND_LABEL, SEND_FOREGROUND_SERVICE_STATUS_FROM_PHONE_PATH, "foreground_disabled".getBytes());
+//                          Toast.makeText(MainActivity.this, "Foreground service stopped.", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                    // enable this for Listening MODE: 1 out of 3
+//                    else if (key.equals("listening_status")) {
+//                        boolean isListeningModeOn = sharedPreferences.getBoolean("listening_status", false);
+//                        if (isListeningModeOn) {
+//                            Wearable.getMessageClient(MainActivity.this)
+//                                    .sendMessage(WATCH_STATUS_LABEL, SEND_LISTENING_STATUS_FROM_PHONE_PATH, "start_listening".getBytes());
+//                        } else {
+//                            Wearable.getMessageClient(MainActivity.this)
+//                                    .sendMessage(WATCH_STATUS_LABEL, SEND_LISTENING_STATUS_FROM_PHONE_PATH, "stop_listening".getBytes());
+//                        }
+//                    }
+                }
+            };
+
+    // Item Selected Listener for Bottom Navigation Bar
+    private final BottomNavigationView.OnNavigationItemSelectedListener
+            mOnNavigationItemSelectedListener =
+            new BottomNavigationView.OnNavigationItemSelectedListener() {
+                @Override
+                public boolean onNavigationItemSelected(@NonNull MenuItem item) {
+                    TextView titleView = findViewById(R.id.title_text);
+                    ScrollView scrollView = findViewById(R.id.scroll_view);
+                    FrameLayout frameLayout = findViewById(R.id.fragment_container);
+                    TextView instructionalView = findViewById(R.id.instruction_text);
+                    Fragment fragment = null;
+                    switch (item.getItemId()) {
+                        case R.id.bottom_navigation_item_home:
+                            titleView.setText(R.string.soundwatch);
+                            fragment = null;
+                            frameLayout.setVisibility(View.GONE);
+                            instructionalView.setVisibility(View.VISIBLE);
+                            scrollView.setVisibility(View.VISIBLE);
+                            break;
+                        case R.id.bottom_navigation_item_about:
+                            titleView.setText(R.string.about);
+                            fragment = new ScrollingFragment();
+                            frameLayout.setVisibility(View.VISIBLE);
+                            instructionalView.setVisibility(View.GONE);
+                            scrollView.setVisibility(View.GONE);
+                            break;
+                        case R.id.bottom_navigation_item_help:
+                            titleView.setText("");
+                            fragment = new HelpFragment();
+                            frameLayout.setVisibility(View.VISIBLE);
+                            instructionalView.setVisibility(View.GONE);
+                            scrollView.setVisibility(View.GONE);
+                            break;
+                        case R.id.bottom_navigation_item_setting:
+                            titleView.setText(R.string.setting);
+                            fragment = new SettingsFragment();
+                            frameLayout.setVisibility(View.VISIBLE);
+                            instructionalView.setVisibility(View.GONE);
+                            scrollView.setVisibility(View.GONE);
+                            break;
+                        default:
+                            break;
+                    }
+                    loadFragment(fragment);
+                    return true;
+                }
+            };
 
     private String convertSetToCommaSeparatedList(Set<String> connectedHostIds) {
         StringBuilder result = new StringBuilder();
@@ -588,26 +861,34 @@ public class MainActivity extends Activity
         registerReceiver(mReceiver, mIntentFilter);
     }
 
+    // Receive message from watch on which sound to snooze, and watch status
     private BroadcastReceiver mReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (intent.getAction().equals(mBroadcastSoundPrediction)) {
+            if (Objects.equals(intent.getAction(), mBroadcastSoundPrediction)) {
                 mDataItemListAdapter.add(new Event("Sound prediction", intent.getStringExtra("Sound prediction")));
-            } else if (intent.getAction().equals(mBroadcastSnoozeSound)) {
-                CheckBox checkBox = getCheckboxFromAudioLabel(intent.getStringExtra(AUDIO_LABEL));
-                Log.i(TAG, "Getting checkbox main" + checkBox);
+            } else if (Objects.equals(intent.getAction(), mBroadcastSnoozeSound)) {
+                CheckBox checkBox = getCheckboxFromAudioLabel(Objects.requireNonNull(intent.getStringExtra(AUDIO_LABEL)));
+                Log.i(TAG, "Getting checkbox main: " + checkBox);
                 SoundNotification soundNotification = SOUNDS_MAP.get(intent.getStringExtra(AUDIO_LABEL));
-                soundNotification.isSnoozed = true;
+                if (soundNotification != null) {
+                    soundNotification.isSnoozed = true;
+                }
                 if (checkBox == null) {
                     return;
                 }
-                checkBox.setText(checkBox.getText() + " (Snoozed) ");
+                if (!checkBox.getText().toString().contains("Snoozed")) {
+                    checkBox.setText(MessageFormat.format("{0} (Snoozed)", checkBox.getText()));
+                }
+                checkBox.setChecked(false);
 //                checkBox.setCompoundDrawablesWithIntrinsicBounds(0,0 , android.R.drawable.ic_lock_silent_mode, 0);
             } else if (intent.getAction().equals(mBroadcastUnsnoozeSound)) {
                 Log.i(TAG, "Phone received unsnoozed");
-                CheckBox checkBox = getCheckboxFromAudioLabel(intent.getStringExtra(AUDIO_LABEL));
+                CheckBox checkBox = getCheckboxFromAudioLabel(Objects.requireNonNull(intent.getStringExtra(AUDIO_LABEL)));
                 SoundNotification soundNotification = SOUNDS_MAP.get(intent.getStringExtra(AUDIO_LABEL));
-                soundNotification.isSnoozed = false;
+                if (soundNotification != null) {
+                    soundNotification.isSnoozed = false;
+                }
                 if (checkBox == null) {
                     return;
                 }
@@ -616,6 +897,15 @@ public class MainActivity extends Activity
                     int snoozeTextIndex = checkBox.getText().toString().indexOf("(Snoozed)");
                     String soundLabel = checkBox.getText().toString().substring(0, snoozeTextIndex);
                     checkBox.setText(soundLabel);
+                    checkBox.setChecked(true);
+//                    checkBox.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
+                }
+            } else if (intent.getAction().equals(mBroadcastForegroundService)) {
+                Log.i(TAG, "Phone received Watch Status: " + intent.getStringExtra(FOREGROUND_LABEL));
+                if (intent.getStringExtra(FOREGROUND_LABEL).equals("watch_start_record")) {
+                    Toast.makeText(MainActivity.this, "Smartwatch starts listening..", Toast.LENGTH_SHORT).show();
+                } else if (intent.getStringExtra(FOREGROUND_LABEL).equals("watch_stop_record")) {
+                    Toast.makeText(MainActivity.this, "Smartwatch stops listening", Toast.LENGTH_SHORT).show();
                 }
             }
         }
@@ -630,9 +920,9 @@ public class MainActivity extends Activity
             case PHONE_RING:
                 return (CheckBox) findViewById(R.id.phone_ring);
             case UTENSILS_AND_CUTLERY:
-                return (CheckBox) findViewById(R.id.knocking);
+                return (CheckBox) findViewById(R.id.utensils_and_cutlery);
             case CHOPPING:
-                return (CheckBox) findViewById(R.id.knocking);
+                return (CheckBox) findViewById(R.id.chopping);
             case VEHICLE:
                 return (CheckBox) findViewById(R.id.vehicle);
             case CAR_HONK:
@@ -649,6 +939,40 @@ public class MainActivity extends Activity
                 return (CheckBox) findViewById(R.id.dishwasher);
             case LAUGHING:
                 return (CheckBox) findViewById(R.id.laughing);
+            case DOG_BARK:
+                return (CheckBox) findViewById(R.id.dog_bark);
+            case DRILL:
+                return (CheckBox) findViewById(R.id.drill);
+            case VACUUM:
+                return (CheckBox) findViewById(R.id.vacuum);
+            case BABY_CRY:
+                return (CheckBox) findViewById(R.id.baby_crying);
+            case SHAVER:
+                return (CheckBox) findViewById(R.id.shaver);
+            case TOOTHBRUSH:
+                return (CheckBox) findViewById(R.id.tooth_brush);
+            case BLENDER:
+                return (CheckBox) findViewById(R.id.blender);
+            case DOORBELL:
+                return (CheckBox) findViewById(R.id.door_bell);
+            case TOILET_FLUSH:
+                return (CheckBox) findViewById(R.id.toilet_flush);
+            case SNORING:
+                return (CheckBox) findViewById(R.id.snoring);
+            case HAMMERING:
+                return (CheckBox) findViewById(R.id.hammering);
+            case SAW:
+                return (CheckBox) findViewById(R.id.saw);
+            case CAT_MEOW:
+                return (CheckBox) findViewById(R.id.cat_meow);
+            case HAIR_DRYER:
+                return (CheckBox) findViewById(R.id.hair_dryer);
+            case ALARM_CLOCK:
+                return (CheckBox) findViewById(R.id.alarm_clock);
+            case COUGHING:
+                return (CheckBox) findViewById(R.id.coughing);
+            case TYPING:
+                return (CheckBox) findViewById(R.id.typing);
             default:
                 return null;
         }
@@ -667,6 +991,7 @@ public class MainActivity extends Activity
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
             Bundle extras = data.getExtras();
             mImageBitmap = (Bitmap) extras.get("data");
@@ -695,6 +1020,7 @@ public class MainActivity extends Activity
 
     @WorkerThread
     private void sendMessageWithData(String node, String title, byte[] data) {
+        Log.i(TAG, "Node: " + node + "\n title: " + title + "\n data: " + Arrays.toString(data));
         Task<Integer> sendMessageTask =
                 Wearable.getMessageClient(this)
                         .sendMessage(node, title, data);
@@ -835,6 +1161,7 @@ public class MainActivity extends Activity
         public View getView(int position, View convertView, ViewGroup parent) {
             ViewHolder holder;
             if (convertView == null) {
+                LOGD(TAG, "convertView is null");
                 holder = new ViewHolder();
                 LayoutInflater inflater =
                         (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
@@ -843,6 +1170,7 @@ public class MainActivity extends Activity
                 holder.text1 = (TextView) convertView.findViewById(android.R.id.text1);
                 holder.text2 = (TextView) convertView.findViewById(android.R.id.text2);
             } else {
+                LOGD(TAG, "convertView is " + convertView.getTag());
                 holder = (ViewHolder) convertView.getTag();
             }
             Event event = getItem(position);
@@ -935,6 +1263,50 @@ public class MainActivity extends Activity
             } catch (InterruptedException exception) {
                 Log.e(TAG, "Interrupt occurred: " + exception);
             }
+        }
+    }
+
+//        private void loadFragment(Fragment fragment) {
+//        // load fragment
+//        FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
+//        transaction.replace(R.id.frame_container, fragment);
+//        transaction.addToBackStack(null);
+//        transaction.commit();
+//    }
+    /**
+     * loading fragment into FrameLayout
+     *
+     * @param fragment a new fragment
+     */
+    private void loadFragment(Fragment fragment) {
+        //switching fragment
+        if (fragment != null) {
+            getSupportFragmentManager()
+                    .beginTransaction()
+                    .replace(R.id.fragment_container, fragment)
+                    .commit();
+        }
+    }
+
+    /*
+    * Set different mode based on user's preferences.
+    * Currently there are two modes:
+    *   1. High Accuracy Mode/ Less sounds recognized: 11 sounds available
+    *   2. Low Accuracy Mode/ More sounds recognized: 30 sounds available
+    *
+    * @param mode 1 for high accuracy, 2 for low accuracy
+    * */
+    private void setAccuracyMode(int mode) {
+        CheckBox checkBoxToDisable;
+        if (mode == HIGH_ACCURACY_MODE) {
+            for (Integer sound: lowAccuracyList) {
+                checkBoxToDisable = (CheckBox)findViewById(sound);
+                checkBoxToDisable.setVisibility(View.GONE);
+            }
+            // some config for padding
+            findViewById(R.id.category_5).setVisibility(View.GONE);
+            findViewById(R.id.padding_top).setPadding(0, 150, 0, 0);
+            findViewById(R.id.padding_bottom).setPadding(0, 0, 0, 80);
         }
     }
 }

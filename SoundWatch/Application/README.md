@@ -16,6 +16,7 @@ Main gateway to receive message from watch including various messages
 - `SOUND_SNOOZE_FROM_WATCH_PATH`
 - `SOUND_UNSNOOZE_FROM_WATCH_PATH`
 - `SEND_CURRENT_BLOCKED_SOUND_PATH`
+- `WATCH_CONNECT_STATUS`
 - `AUDIO_PREDICTIOn`
 
 
@@ -98,5 +99,6 @@ Tests
 
 Support
 -------
-Contact [Hung V Ngo](www.hungvngo.com) @MakeabilityLab through email `hvn297` at cs.washington.edu
-Developed with [Dhruv Jain](https://homes.cs.washington.edu/~djain/) and collaborators at [MakeabilityLab](https://makeabilitylab.cs.washington.edu/)
+- Contact [Hung V Ngo](www.hungvngo.com) @MakeabilityLab through email `hvn297` at cs.washington.edu
+- Contact [Khoa Nguyen](https://www.linkedin.com/in/akka/) @MakeabilityLab through email `akhoa99` at cs.washington.edu
+- Developed with [Dhruv Jain](https://homes.cs.washington.edu/~djain/) and collaborators at [MakeabilityLab](https://makeabilitylab.cs.washington.edu/)
